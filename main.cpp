@@ -26,6 +26,7 @@ std::unordered_map<std::string, std::string> parse_args(int argc, char* argv[]) 
 }
 
 std::filesystem::path glog_filepath = "./server_msgs.log";
+std::string gport = "0000";
 
 int main(int argc, char* argv[]) {
 
@@ -35,6 +36,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    gport = args["0"]; // first argument is the port.
+
     if (args.size() == 1) {
         std::printf("No log output file was provided. Dumping locally at %s\n", glog_filepath.string().c_str());
     }
@@ -42,4 +45,6 @@ int main(int argc, char* argv[]) {
         glog_filepath = args["log-file"];
         std::printf("%s\n", glog_filepath.c_str());
     }
+
+
 }
