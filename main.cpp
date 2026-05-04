@@ -5,9 +5,11 @@
 #include <netdb.h>
 #include <expected>
 #include <csignal>
+#include <fstream>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <poll.h>
+#include <vector>
 
 std::unordered_map<std::string, std::string> parse_args(int argc, char* argv[]) {
     std::unordered_map<std::string, std::string> args;
@@ -40,12 +42,14 @@ namespace config {
 
 namespace app {
     std::atomic<bool> gstop{false};
-    int errcode = 0;
+    std::atomic<int> errcode = 0;
 
     void stop_with_errcode(int code) {
         gstop.store(true);
         errcode = code;
     }
+
+    std::unique_ptr<std::ofstream> glog_file_stream = nullptr;
 }
 
 void* get_in_addr(sockaddr* sa) {
@@ -81,22 +85,20 @@ std::expected<int, std::string> get_listen_socket() {
         // Clear socket
         int yes = 1;
         if (setsockopt(file_descriptor, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-            return std::unexpected(std::format("setsockopt() failed: {0}", strerror(errno)));
+            close(file_descriptor);
+            continue;
         }
 
         if (bind(file_descriptor, p->ai_addr, p->ai_addrlen) == -1) {
-            return std::unexpected(std::format("bind() failed: {0}", strerror(errno)));
+            close(file_descriptor);
+            continue;
         }
 
         break;
     }
 
-    if (file_descriptor == -1) {
-        return std::unexpected(std::format("get_listen_socket() failed: {0}", strerror(errno)));
-    }
-
-    if (listen(file_descriptor, SOMAXCONN) == -1) {
-        return std::unexpected(std::format("listen() failed: {0}", strerror(errno)));
+    if (p == nullptr) {
+        return std::unexpected(std::format("getaddrinfo() failed: {0}", strerror(errno)));
     }
 
     char _[INET6_ADDRSTRLEN];
@@ -107,13 +109,21 @@ std::expected<int, std::string> get_listen_socket() {
     );
 
     freeaddrinfo(server_info);
+    if (listen(file_descriptor, SOMAXCONN) == -1) {
+        return std::unexpected(std::format("listen() failed: {0}", strerror(errno)));
+    }
 
-    std::printf("Listening at %s", listening_ip);
+    std::printf("Listening at %s\n", listening_ip);
+
+    if (file_descriptor == -1) {
+        return std::unexpected(std::format("get_listen_socket() failed: {0}", strerror(errno)));
+    }
+
     return file_descriptor;
 }
 
-void handle_sigchld(int) {
-    while (waitpid(-1, nullptr, WNOHANG) > 0);
+void handle_sigterm(int) {
+    app::gstop.store(true);
 }
 
 void handle_sigint(int) {
@@ -121,12 +131,12 @@ void handle_sigint(int) {
 }
 
 bool setup_sigint_sigterm_bindigns() {
-    struct sigaction sa_chld;
-    sa_chld.sa_handler = handle_sigchld;
-    sigemptyset(&sa_chld.sa_mask);
-    sa_chld.sa_flags = SA_RESTART;
+    struct sigaction sa_term;
+    sa_term.sa_handler = handle_sigterm;
+    sigemptyset(&sa_term.sa_mask);
+    sa_term.sa_flags = SA_RESTART;
 
-    if (sigaction(SIGCHLD, &sa_chld, nullptr) == -1) {
+    if (sigaction(SIGTERM, &sa_term, nullptr) == -1) {
         std::cout << std::format("sigaction(SIGCHLD) failed: {0}", strerror(errno)) << std::endl;
         return false;
     }
@@ -145,65 +155,51 @@ bool setup_sigint_sigterm_bindigns() {
 
 // Wrapper for pollfd with auto cleaning and polling
 class polling_file_descriptors {
-    int size{5};
-    int count{0};
-    pollfd* inner_ptr = nullptr;
+    std::vector<pollfd> inner_vec;
 
 public:
-    polling_file_descriptors(int size) : size(size) {
-        inner_ptr = (pollfd*)malloc(sizeof *inner_ptr * size);
-    }
-
-    ~polling_file_descriptors() {
-        if (inner_ptr != nullptr) {
-            free(inner_ptr);
-        }
+    polling_file_descriptors(int size) {
+        inner_vec.resize(size);
     }
 
     // Interface functions
     void add(int new_fd, short events = POLLIN) {
-        if (count == size) {
-            size *= 2;
-            inner_ptr = (pollfd*)realloc(inner_ptr, sizeof *inner_ptr * size);
-        }
-
-        inner_ptr[count].fd = new_fd;
-        inner_ptr[count].events = events;
-        inner_ptr[count].revents = 0;
-        ++count;
+        inner_vec.push_back(
+            pollfd{
+                new_fd,
+                events,
+                0
+            }
+        );
     }
 
     auto& at(int index) {
-        return inner_ptr[index];
+        return inner_vec[index];
     }
 
     void remove_at(int index) {
-        at(index) = at(count - 1);
-        --count;
+        inner_vec.erase(inner_vec.begin() + index);
     }
 
     [[nodiscard]] bool is_valid_entry(int index) const {
-        return 0 <= index && index < count;
+        return 0 <= index && index < get_count() + 1;
     }
 
     [[nodiscard]] bool is_ready_at(int index, short events) const {
-        return is_valid_entry(index) && inner_ptr[index].revents & (events);
+        return is_valid_entry(index) && inner_vec[index].revents & (events);
     }
 
-    [[nodiscard]] int poll(int timeout) const {
-        return ::poll(inner_ptr, count, timeout);
+    [[nodiscard]] int poll(int timeout) {
+        return ::poll(inner_vec.data(), get_count(), timeout);
     }
 
-    [[nodiscard]] int get_count() const
-    { return count; }
-
-    [[nodiscard]] int get_size() const
-    { return size; }
+    [[nodiscard]] size_t get_count() const
+    { return inner_vec.size(); }
 };
 
 void handle_new_connection(int listening_socket, polling_file_descriptors& pfds) {
     sockaddr_storage client_address;
-    socklen_t addrlen = sizeof client_address;;
+    socklen_t addrlen = sizeof client_address;
 
     int new_file_desc = accept(listening_socket, (sockaddr*)&client_address, &addrlen);
     if (new_file_desc == -1) {
@@ -215,7 +211,7 @@ void handle_new_connection(int listening_socket, polling_file_descriptors& pfds)
     std::printf("New connections on socket: %d\n", new_file_desc);
 }
 
-void handle_client_data(int listening_socket, polling_file_descriptors & pfds, int& i) {
+void handle_client_data(polling_file_descriptors & pfds, int& i) {
     char buffer[256]; // data;
 
     int bytes_received = recv(pfds.at(i).fd, buffer, sizeof(buffer), 0);
@@ -237,7 +233,15 @@ void handle_client_data(int listening_socket, polling_file_descriptors & pfds, i
     else {
         std::printf("server: received from fd: %d: %s", pfds.at(i).fd, buffer);
 
-        // broadcast to all the clinets received data
+        // Dump the client data to the log file.
+        std::ofstream outfile(config::glog_filepath.c_str(), std::ios::app);
+
+        if (app::glog_file_stream) {
+            app::glog_file_stream->write(buffer, bytes_received);
+        }
+        else {
+            std::cerr << "Log file stream is null!" << std::endl;
+        }
     }
 }
 
@@ -255,7 +259,9 @@ int main(int argc, char* argv[]) {
         std::printf("No log output file was provided. Dumping locally at %s\n", config::glog_filepath.string().c_str());
     }
     else if (args.size() == 2) {
-        config::glog_filepath = args["log-file"];
+        const auto file_path = args["log-file"];
+        if (!file_path.empty()) config::glog_filepath = file_path;
+
         std::printf("%s\n", config::glog_filepath.c_str());
     }
 
@@ -274,6 +280,9 @@ int main(int argc, char* argv[]) {
     polling_file_descriptors pfds(config::GDEFAULT_POLL_SIZE);
     pfds.add(listening_socket, POLLIN); // acount for listening socket
 
+    // Open log file stream
+    app::glog_file_stream = std::make_unique<std::ofstream>(config::glog_filepath, std::ios::app);
+
     while (!app::gstop.load()) {
         auto poll_count = pfds.poll(-1);
         if (poll_count == -1) {
@@ -284,10 +293,12 @@ int main(int argc, char* argv[]) {
 
         for (int i = 0; i < pfds.get_count(); ++i) {
             if (pfds.is_ready_at(i, (POLLIN | POLLHUP))) {
-                handle_new_connection(listening_socket, pfds);
-            }
-            else {
-                handle_client_data(listening_socket, pfds, i);
+                if (pfds.at(i).fd == listening_socket) {
+                    handle_new_connection(listening_socket, pfds);
+                }
+                else {
+                    handle_client_data(pfds, i);
+                }
             }
         }
     }
