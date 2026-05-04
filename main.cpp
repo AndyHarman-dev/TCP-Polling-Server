@@ -98,7 +98,8 @@ std::expected<int, std::string> get_listen_socket() {
     }
 
     if (p == nullptr) {
-        return std::unexpected(std::format("getaddrinfo() failed: {0}", strerror(errno)));
+        freeaddrinfo(server_info);
+        return std::unexpected(std::format("either socket() or bind() failed: {0}", strerror(errno)));
     }
 
     char _[INET6_ADDRSTRLEN];
@@ -115,18 +116,16 @@ std::expected<int, std::string> get_listen_socket() {
 
     std::printf("Listening at %s\n", listening_ip);
 
-    if (file_descriptor == -1) {
-        return std::unexpected(std::format("get_listen_socket() failed: {0}", strerror(errno)));
-    }
-
     return file_descriptor;
 }
 
 void handle_sigterm(int) {
+    std::cout << "Handled SIGTERM!";
     app::gstop.store(true);
 }
 
 void handle_sigint(int) {
+    std::cout << "Handled SIGINT!";
     app::gstop.store(true);
 }
 
@@ -137,7 +136,7 @@ bool setup_sigint_sigterm_bindigns() {
     sa_term.sa_flags = SA_RESTART;
 
     if (sigaction(SIGTERM, &sa_term, nullptr) == -1) {
-        std::cout << std::format("sigaction(SIGCHLD) failed: {0}", strerror(errno)) << std::endl;
+        std::cout << std::format("sigaction(SIGTERM) failed: {0}", strerror(errno)) << std::endl;
         return false;
     }
 
@@ -159,7 +158,7 @@ class polling_file_descriptors {
 
 public:
     polling_file_descriptors(int size) {
-        inner_vec.resize(size);
+        inner_vec.reserve(size);
     }
 
     // Interface functions
@@ -182,7 +181,7 @@ public:
     }
 
     [[nodiscard]] bool is_valid_entry(int index) const {
-        return 0 <= index && index < get_count() + 1;
+        return 0 <= index && index < get_count();
     }
 
     [[nodiscard]] bool is_ready_at(int index, short events) const {
@@ -231,13 +230,11 @@ void handle_client_data(polling_file_descriptors & pfds, int& i) {
         i--; // acount for the removal for the loop's index.
     }
     else {
-        std::printf("server: received from fd: %d: %s", pfds.at(i).fd, buffer);
-
-        // Dump the client data to the log file.
-        std::ofstream outfile(config::glog_filepath.c_str(), std::ios::app);
+        std::printf("server: received from fd: %d: %.*s\n", pfds.at(i).fd, bytes_received, buffer);
 
         if (app::glog_file_stream) {
             app::glog_file_stream->write(buffer, bytes_received);
+            app::glog_file_stream->flush();
         }
         else {
             std::cerr << "Log file stream is null!" << std::endl;
@@ -286,6 +283,10 @@ int main(int argc, char* argv[]) {
     while (!app::gstop.load()) {
         auto poll_count = pfds.poll(-1);
         if (poll_count == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
+
             std::cerr << "Poll() error" << std::endl;
             app::stop_with_errcode(1);
             break;
