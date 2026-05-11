@@ -33,25 +33,32 @@ std::unordered_map<std::string, std::string> parse_args(int argc, char* argv[]) 
     return args;
 }
 
+// TODO: This in itself should be a separated settings object, that dumps this info to actual files liie .ini files or .json files to persist the config and be able to change it at runtime
 namespace config {
+
+    // TODO: The loggins should be encapsulated into a separate object that dumps automatically logs everytime I log anything instead of having the ostream and file path and all that. Better to use some logging lib
     std::filesystem::path glog_filepath = "./server_msgs.log";
     std::string gport = "0000";
 
     constexpr int GDEFAULT_POLL_SIZE = 5;
 }
 
+//TODO: app related fields could also be encapsulated in App object
 namespace app {
     std::atomic<bool> gstop{false};
     std::atomic<int> errcode = 0;
 
+    // TODO: Given app's looped nature we should have a united shutdown scalable mechanism so that we can gracefully handle any shutdown specifics of this program
     void stop_with_errcode(int code) {
         gstop.store(true);
         errcode = code;
     }
 
+    //TODO: It was here only for optimization. Probably would just be a field in the app object
     std::unique_ptr<std::ofstream> glog_file_stream = nullptr;
 }
 
+// TODO: This kind of helper functions would go to a separate namespace of utilties
 void* get_in_addr(sockaddr* sa) {
     if (sa->sa_family == AF_INET) {
         return &(((struct sockaddr_in*)sa)->sin_addr);
@@ -60,6 +67,7 @@ void* get_in_addr(sockaddr* sa) {
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
+// TODO: I think expected is overkill for these. This socket pipeline in itself could be Object oriented hiding the details
 std::expected<int, std::string> get_listen_socket() {
 
     addrinfo hints, *server_info;
@@ -119,6 +127,7 @@ std::expected<int, std::string> get_listen_socket() {
     return file_descriptor;
 }
 
+// TODO: Handling functions go to app or shutdown mechanism
 void handle_sigterm(int) {
     std::cout << "Handled SIGTERM!";
     app::gstop.store(true);
@@ -129,6 +138,7 @@ void handle_sigint(int) {
     app::gstop.store(true);
 }
 
+// TODO: To app
 bool setup_sigint_sigterm_bindigns() {
     struct sigaction sa_term;
     sa_term.sa_handler = handle_sigterm;
@@ -153,6 +163,7 @@ bool setup_sigint_sigterm_bindigns() {
 }
 
 // Wrapper for pollfd with auto cleaning and polling
+// TODO: Only exists because I used raw memory first, std::vector is enough though. Probably in the new architecture wouldn't exist at all!
 class polling_file_descriptors {
     std::vector<pollfd> inner_vec;
 
@@ -196,6 +207,7 @@ public:
     { return inner_vec.size(); }
 };
 
+// TODO: that should exist in the app probably, too but I'm unsure whether or not to give their proper objects for a client to store the socket id
 void handle_new_connection(int listening_socket, polling_file_descriptors& pfds) {
     sockaddr_storage client_address;
     socklen_t addrlen = sizeof client_address;
@@ -210,6 +222,7 @@ void handle_new_connection(int listening_socket, polling_file_descriptors& pfds)
     std::printf("New connections on socket: %d\n", new_file_desc);
 }
 
+//TODO: Here, too we could have the encapsulate the data receiving from the client object instead of having it in the app
 void handle_client_data(polling_file_descriptors & pfds, int& i) {
     char buffer[256]; // data;
 
@@ -244,7 +257,7 @@ void handle_client_data(polling_file_descriptors & pfds, int& i) {
 
 int main(int argc, char* argv[]) {
 
-    auto args = parse_args(argc, argv);
+    auto args = parse_args(argc, argv); // TODO: Argument parsing could be incapsulated into a separate object
     if (args.empty()) {
         std::cerr << "Usage: server <port> [options]" << std::endl;
         return 1;
