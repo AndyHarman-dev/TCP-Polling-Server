@@ -5,12 +5,12 @@
 #include <netdb.h>
 #include <expected>
 #include <csignal>
-#include <fstream>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <poll.h>
 #include <vector>
 #include "util/sockets.h"
+#include "logging/Logger.h"
 
 std::unordered_map<std::string, std::string> parse_args(int argc, char* argv[]) {
     std::unordered_map<std::string, std::string> args;
@@ -55,8 +55,8 @@ namespace app {
         errcode = code;
     }
 
-    //TODO: It was here only for optimization. Probably would just be a field in the app object
-    std::unique_ptr<std::ofstream> glog_file_stream = nullptr;
+    // TODO: Move into App object in Phase 6
+    std::unique_ptr<Logger> glogger = nullptr;
 }
 
 // TODO: I think expected is overkill for these. This socket pipeline in itself could be Object oriented hiding the details
@@ -237,12 +237,11 @@ void handle_client_data(polling_file_descriptors & pfds, int& i) {
     else {
         std::printf("server: received from fd: %d: %.*s\n", pfds.at(i).fd, bytes_received, buffer);
 
-        if (app::glog_file_stream) {
-            app::glog_file_stream->write(buffer, bytes_received);
-            app::glog_file_stream->flush();
+        if (app::glogger) {
+            app::glogger->raw(buffer, bytes_received);
         }
         else {
-            std::cerr << "Log file stream is null!" << std::endl;
+            std::cerr << "Logger is null!" << std::endl;
         }
     }
 }
@@ -282,8 +281,7 @@ int main(int argc, char* argv[]) {
     polling_file_descriptors pfds(config::GDEFAULT_POLL_SIZE);
     pfds.add(listening_socket, POLLIN); // acount for listening socket
 
-    // Open log file stream
-    app::glog_file_stream = std::make_unique<std::ofstream>(config::glog_filepath, std::ios::app);
+    app::glogger = std::make_unique<Logger>(config::glog_filepath);
 
     while (!app::gstop.load()) {
         auto poll_count = pfds.poll(-1);
