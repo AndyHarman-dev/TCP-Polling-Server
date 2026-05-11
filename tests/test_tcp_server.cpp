@@ -38,3 +38,28 @@ TEST_CASE("TcpServer: client can connect") {
 TEST_CASE("TcpServer: throws on invalid port") {
     CHECK_THROWS_AS(TcpServer("not_a_port"), std::runtime_error);
 }
+
+TEST_CASE("TcpServer: accept_client returns a Client with a valid fd") {
+    TcpServer server("0");
+
+    sockaddr_storage addr{};
+    socklen_t len = sizeof(addr);
+    REQUIRE(getsockname(server.fd(), reinterpret_cast<sockaddr*>(&addr), &len) == 0);
+    int port = ntohs(reinterpret_cast<sockaddr_in*>(&addr)->sin_port);
+
+    addrinfo hints{}, *res;
+    hints.ai_family   = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    REQUIRE(getaddrinfo("127.0.0.1", std::to_string(port).c_str(), &hints, &res) == 0);
+
+    int peer_fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    REQUIRE(peer_fd >= 0);
+    REQUIRE(::connect(peer_fd, res->ai_addr, res->ai_addrlen) == 0);
+    freeaddrinfo(res);
+
+    Client accepted = server.accept_client();
+    CHECK(accepted.fd() >= 0);
+
+    close(peer_fd);
+    // accepted closed by Client destructor
+}

@@ -58,3 +58,13 @@ TcpServer::~TcpServer() {
 int TcpServer::fd() const {
     return fd_;
 }
+
+Client TcpServer::accept_client() const {
+    sockaddr_storage addr{};
+    socklen_t len = sizeof(addr);
+    int client_fd = accept(fd_, reinterpret_cast<sockaddr*>(&addr), &len);
+    if (client_fd == -1) {
+        throw std::runtime_error(std::format("accept() failed: {}", strerror(errno)));
+    }
+    return Client(client_fd, addr);
+}

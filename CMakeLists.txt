@@ -20,6 +20,8 @@ add_library(tcp_echo_core STATIC
     util/sockets.cpp
     logging/Logger.cpp
     config/ArgParser.cpp
+    net/Client.cpp
+    net/ClientPool.cpp
     net/TcpServer.cpp
 )
 target_include_directories(tcp_echo_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -34,6 +36,8 @@ add_executable(tests
     tests/test_logger.cpp
     tests/test_arg_parser.cpp
     tests/test_tcp_server.cpp
+    tests/test_client.cpp
+    tests/test_client_pool.cpp
 )
 target_link_libraries(tests PRIVATE tcp_echo_core doctest::doctest)
 add_test(NAME tests COMMAND tests)

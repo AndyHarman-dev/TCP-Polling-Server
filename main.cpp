@@ -5,14 +5,12 @@
 #include <format>
 #include <iostream>
 #include <memory>
-#include <poll.h>
 #include <string>
-#include <sys/socket.h>
-#include <unistd.h>
-#include <vector>
 #include "config/ArgParser.h"
 #include "config/Config.h"
 #include "logging/Logger.h"
+#include "net/Client.h"
+#include "net/ClientPool.h"
 #include "net/TcpServer.h"
 
 //TODO: app related fields could also be encapsulated in App object
@@ -65,98 +63,6 @@ bool setup_sigint_sigterm_bindigns() {
     return true;
 }
 
-// Wrapper for pollfd with auto cleaning and polling
-// TODO: Only exists because I used raw memory first, std::vector is enough though. Probably in the new architecture wouldn't exist at all!
-class polling_file_descriptors {
-    std::vector<pollfd> inner_vec;
-
-public:
-    polling_file_descriptors(int size) {
-        inner_vec.reserve(size);
-    }
-
-    // Interface functions
-    void add(int new_fd, short events = POLLIN) {
-        inner_vec.push_back(
-            pollfd{
-                new_fd,
-                events,
-                0
-            }
-        );
-    }
-
-    auto& at(int index) {
-        return inner_vec[index];
-    }
-
-    void remove_at(int index) {
-        inner_vec.erase(inner_vec.begin() + index);
-    }
-
-    [[nodiscard]] bool is_valid_entry(int index) const {
-        return 0 <= index && index < get_count();
-    }
-
-    [[nodiscard]] bool is_ready_at(int index, short events) const {
-        return is_valid_entry(index) && inner_vec[index].revents & (events);
-    }
-
-    [[nodiscard]] int poll(int timeout) {
-        return ::poll(inner_vec.data(), get_count(), timeout);
-    }
-
-    [[nodiscard]] size_t get_count() const
-    { return inner_vec.size(); }
-};
-
-// TODO: that should exist in the app probably, too but I'm unsure whether or not to give their proper objects for a client to store the socket id
-void handle_new_connection(int listening_socket, polling_file_descriptors& pfds) {
-    sockaddr_storage client_address;
-    socklen_t addrlen = sizeof client_address;
-
-    int new_file_desc = accept(listening_socket, (sockaddr*)&client_address, &addrlen);
-    if (new_file_desc == -1) {
-        std::cerr << std::format("accept() failed: {0}", strerror(errno)) << std::endl;
-        return;
-    }
-
-    pfds.add(new_file_desc, POLLIN);
-    std::printf("New connections on socket: %d\n", new_file_desc);
-}
-
-//TODO: Here, too we could have the encapsulate the data receiving from the client object instead of having it in the app
-void handle_client_data(polling_file_descriptors & pfds, int& i) {
-    char buffer[256]; // data;
-
-    int bytes_received = recv(pfds.at(i).fd, buffer, sizeof(buffer), 0);
-    if (bytes_received <= 0) {
-        // The case of client hanging up
-        if (bytes_received == 0) {
-            std::cerr << "Client" << pfds.at(i).fd << "hung up" << std::endl;
-        }
-        else {
-            std::cerr << std::format("recv() failed: {0}", strerror(errno)) << std::endl;
-        }
-
-        // Close a broken connection
-        close(pfds.at(i).fd);
-        pfds.remove_at(i);
-
-        i--; // acount for the removal for the loop's index.
-    }
-    else {
-        std::printf("server: received from fd: %d: %.*s\n", pfds.at(i).fd, bytes_received, buffer);
-
-        if (app::glogger) {
-            app::glogger->raw(buffer, bytes_received);
-        }
-        else {
-            std::cerr << "Logger is null!" << std::endl;
-        }
-    }
-}
-
 int main(int argc, char* argv[]) {
 
     Config cfg;
@@ -181,35 +87,40 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     std::printf("Listening on port %s\n", cfg.port.c_str());
-    const int listening_socket = server->fd();
-
-    polling_file_descriptors pfds(cfg.poll_size);
-    pfds.add(listening_socket, POLLIN);
-
     app::glogger = std::make_unique<Logger>(cfg.log_path);
+    ClientPool pool(server->fd(), cfg.poll_size);
 
     while (!app::gstop.load()) {
-        auto poll_count = pfds.poll(-1);
+        int poll_count = pool.poll(-1);
         if (poll_count == -1) {
-            if (errno == EINTR) {
-                continue;
-            }
-
-            std::cerr << "Poll() error" << std::endl;
+            if (errno == EINTR) continue;
+            std::cerr << "poll() failed" << std::endl;
             app::stop_with_errcode(1);
             break;
         }
 
-        for (int i = 0; i < pfds.get_count(); ++i) {
-            if (pfds.is_ready_at(i, (POLLIN | POLLHUP))) {
-                if (pfds.at(i).fd == listening_socket) {
-                    handle_new_connection(listening_socket, pfds);
-                }
-                else {
-                    handle_client_data(pfds, i);
-                }
+        if (pool.is_server_ready()) {
+            try {
+                pool.add(server->accept_client());
+            } catch (const std::runtime_error& e) {
+                std::cerr << e.what() << std::endl;
             }
         }
+
+        pool.for_each_ready_client([](Client& client) -> bool {
+            int n = client.receive();
+            if (n == 0) {
+                std::printf("Client fd %d disconnected\n", client.fd());
+                return false;
+            }
+            if (n < 0) {
+                std::cerr << std::format("recv() failed for fd {}: {}\n", client.fd(), strerror(errno));
+                return false;
+            }
+            std::printf("server: received from fd %d: %.*s\n", client.fd(), n, client.buffer());
+            if (app::glogger) app::glogger->raw(client.buffer(), n);
+            return true;
+        });
     }
 
     return app::errcode;
