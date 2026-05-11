@@ -10,6 +10,7 @@
 #include <arpa/inet.h>
 #include <poll.h>
 #include <vector>
+#include "util/sockets.h"
 
 std::unordered_map<std::string, std::string> parse_args(int argc, char* argv[]) {
     std::unordered_map<std::string, std::string> args;
@@ -58,15 +59,6 @@ namespace app {
     std::unique_ptr<std::ofstream> glog_file_stream = nullptr;
 }
 
-// TODO: This kind of helper functions would go to a separate namespace of utilties
-void* get_in_addr(sockaddr* sa) {
-    if (sa->sa_family == AF_INET) {
-        return &(((struct sockaddr_in*)sa)->sin_addr);
-    }
-
-    return &(((struct sockaddr_in6*)sa)->sin6_addr);
-}
-
 // TODO: I think expected is overkill for these. This socket pipeline in itself could be Object oriented hiding the details
 std::expected<int, std::string> get_listen_socket() {
 
@@ -113,7 +105,7 @@ std::expected<int, std::string> get_listen_socket() {
     char _[INET6_ADDRSTRLEN];
     const auto listening_ip = inet_ntop(
         p->ai_family,
-        get_in_addr(p->ai_addr),
+        util::get_in_addr(p->ai_addr),
         _, sizeof _
     );
 
