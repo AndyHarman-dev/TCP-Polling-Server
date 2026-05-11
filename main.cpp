@@ -1,17 +1,19 @@
-#include <filesystem>
-#include <iostream>
-#include <string>
-#include <netdb.h>
-#include <expected>
+#include <atomic>
+#include <cerrno>
 #include <csignal>
-#include <unistd.h>
-#include <arpa/inet.h>
+#include <cstring>
+#include <format>
+#include <iostream>
+#include <memory>
 #include <poll.h>
+#include <string>
+#include <sys/socket.h>
+#include <unistd.h>
 #include <vector>
-#include "util/sockets.h"
-#include "logging/Logger.h"
-#include "config/Config.h"
 #include "config/ArgParser.h"
+#include "config/Config.h"
+#include "logging/Logger.h"
+#include "net/TcpServer.h"
 
 //TODO: app related fields could also be encapsulated in App object
 namespace app {
@@ -26,66 +28,6 @@ namespace app {
 
     // TODO: Move into App object in Phase 6
     std::unique_ptr<Logger> glogger = nullptr;
-}
-
-// TODO: Replace with TcpServer class in Phase 4
-std::expected<int, std::string> get_listen_socket(const std::string& port) {
-
-    addrinfo hints, *server_info;
-
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_PASSIVE; // auto ip
-
-    if (int rv; (rv = getaddrinfo(nullptr, port.c_str(), &hints, &server_info)) != 0) {
-        std::cerr << "getaddrinfo() failed: " << gai_strerror(rv) << std::endl;
-        return std::unexpected(std::format("getaddrinfo() failed: {0}", gai_strerror(rv)));
-    }
-
-    addrinfo *p;
-    int file_descriptor = -1;
-    for (p = server_info; p != nullptr; p = p->ai_next) {
-
-        if ((file_descriptor = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
-            continue;
-        }
-
-        // Clear socket
-        int yes = 1;
-        if (setsockopt(file_descriptor, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-            close(file_descriptor);
-            continue;
-        }
-
-        if (bind(file_descriptor, p->ai_addr, p->ai_addrlen) == -1) {
-            close(file_descriptor);
-            continue;
-        }
-
-        break;
-    }
-
-    if (p == nullptr) {
-        freeaddrinfo(server_info);
-        return std::unexpected(std::format("either socket() or bind() failed: {0}", strerror(errno)));
-    }
-
-    char _[INET6_ADDRSTRLEN];
-    const auto listening_ip = inet_ntop(
-        p->ai_family,
-        util::get_in_addr(p->ai_addr),
-        _, sizeof _
-    );
-
-    freeaddrinfo(server_info);
-    if (listen(file_descriptor, SOMAXCONN) == -1) {
-        return std::unexpected(std::format("listen() failed: {0}", strerror(errno)));
-    }
-
-    std::printf("Listening at %s\n", listening_ip);
-
-    return file_descriptor;
 }
 
 // TODO: Handling functions go to app or shutdown mechanism
@@ -231,13 +173,15 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    auto expected_socket = get_listen_socket(cfg.port);
-    if (!expected_socket.has_value()) {
-        std::cerr << expected_socket.error() << std::endl;
+    std::unique_ptr<TcpServer> server;
+    try {
+        server = std::make_unique<TcpServer>(cfg.port);
+    } catch (const std::runtime_error& e) {
+        std::cerr << e.what() << std::endl;
         return 1;
     }
-
-    auto listening_socket = expected_socket.value();
+    std::printf("Listening on port %s\n", cfg.port.c_str());
+    const int listening_socket = server->fd();
 
     polling_file_descriptors pfds(cfg.poll_size);
     pfds.add(listening_socket, POLLIN);
@@ -268,6 +212,5 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    close(listening_socket);
     return app::errcode;
 }
