@@ -1,7 +1,6 @@
 #include <filesystem>
 #include <iostream>
 #include <string>
-#include <unordered_map>
 #include <netdb.h>
 #include <expected>
 #include <csignal>
@@ -11,38 +10,8 @@
 #include <vector>
 #include "util/sockets.h"
 #include "logging/Logger.h"
-
-std::unordered_map<std::string, std::string> parse_args(int argc, char* argv[]) {
-    std::unordered_map<std::string, std::string> args;
-    int positional = 0;
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg.rfind("--", 0) == 0) {
-            std::string body = arg.substr(2);
-            auto eq = body.find('=');
-            if (eq != std::string::npos) {
-                args[body.substr(0, eq)] = body.substr(eq + 1);
-            } else if (i + 1 < argc && std::string(argv[i + 1]).rfind("--", 0) != 0) {
-                args[body] = argv[++i];
-            } else {
-                args[body] = "";
-            }
-        } else {
-            args[std::to_string(positional++)] = arg;
-        }
-    }
-    return args;
-}
-
-// TODO: This in itself should be a separated settings object, that dumps this info to actual files liie .ini files or .json files to persist the config and be able to change it at runtime
-namespace config {
-
-    // TODO: The loggins should be encapsulated into a separate object that dumps automatically logs everytime I log anything instead of having the ostream and file path and all that. Better to use some logging lib
-    std::filesystem::path glog_filepath = "./server_msgs.log";
-    std::string gport = "0000";
-
-    constexpr int GDEFAULT_POLL_SIZE = 5;
-}
+#include "config/Config.h"
+#include "config/ArgParser.h"
 
 //TODO: app related fields could also be encapsulated in App object
 namespace app {
@@ -59,8 +28,8 @@ namespace app {
     std::unique_ptr<Logger> glogger = nullptr;
 }
 
-// TODO: I think expected is overkill for these. This socket pipeline in itself could be Object oriented hiding the details
-std::expected<int, std::string> get_listen_socket() {
+// TODO: Replace with TcpServer class in Phase 4
+std::expected<int, std::string> get_listen_socket(const std::string& port) {
 
     addrinfo hints, *server_info;
 
@@ -69,7 +38,7 @@ std::expected<int, std::string> get_listen_socket() {
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE; // auto ip
 
-    if (int rv; (rv = getaddrinfo(nullptr, config::gport.c_str(), &hints, &server_info)) != 0) {
+    if (int rv; (rv = getaddrinfo(nullptr, port.c_str(), &hints, &server_info)) != 0) {
         std::cerr << "getaddrinfo() failed: " << gai_strerror(rv) << std::endl;
         return std::unexpected(std::format("getaddrinfo() failed: {0}", gai_strerror(rv)));
     }
@@ -248,29 +217,21 @@ void handle_client_data(polling_file_descriptors & pfds, int& i) {
 
 int main(int argc, char* argv[]) {
 
-    auto args = parse_args(argc, argv); // TODO: Argument parsing could be incapsulated into a separate object
-    if (args.empty()) {
-        std::cerr << "Usage: server <port> [options]" << std::endl;
+    Config cfg;
+    try {
+        ArgParser(argc, argv).apply(cfg);
+    } catch (const std::invalid_argument& e) {
+        std::cerr << e.what() << std::endl;
         return 1;
     }
 
-    config::gport = args["0"]; // first argument is the port.
-
-    if (args.size() == 1) {
-        std::printf("No log output file was provided. Dumping locally at %s\n", config::glog_filepath.string().c_str());
-    }
-    else if (args.size() == 2) {
-        const auto file_path = args["log-file"];
-        if (!file_path.empty()) config::glog_filepath = file_path;
-
-        std::printf("%s\n", config::glog_filepath.c_str());
-    }
+    std::printf("Logging to %s\n", cfg.log_path.string().c_str());
 
     if (!setup_sigint_sigterm_bindigns()) {
         return 1;
     }
 
-    auto expected_socket = get_listen_socket();
+    auto expected_socket = get_listen_socket(cfg.port);
     if (!expected_socket.has_value()) {
         std::cerr << expected_socket.error() << std::endl;
         return 1;
@@ -278,10 +239,10 @@ int main(int argc, char* argv[]) {
 
     auto listening_socket = expected_socket.value();
 
-    polling_file_descriptors pfds(config::GDEFAULT_POLL_SIZE);
-    pfds.add(listening_socket, POLLIN); // acount for listening socket
+    polling_file_descriptors pfds(cfg.poll_size);
+    pfds.add(listening_socket, POLLIN);
 
-    app::glogger = std::make_unique<Logger>(config::glog_filepath);
+    app::glogger = std::make_unique<Logger>(cfg.log_path);
 
     while (!app::gstop.load()) {
         auto poll_count = pfds.poll(-1);

@@ -1,8 +1,14 @@
 #include "logging/Logger.h"
 #include <iostream>
+#include <stdexcept>
 
 Logger::Logger(const std::filesystem::path& log_path)
-    : file_(log_path, std::ios::app) {}
+    : file_(log_path, std::ios::app)
+{
+    if (!file_.is_open()) {
+        throw std::runtime_error("Logger: failed to open log file: " + log_path.string());
+    }
+}
 
 void Logger::info(std::string_view msg) {
     std::lock_guard lock(mutex_);
