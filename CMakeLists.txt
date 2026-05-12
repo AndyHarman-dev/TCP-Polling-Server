@@ -23,6 +23,8 @@ add_library(tcp_echo_core STATIC
     net/Client.cpp
     net/ClientPool.cpp
     net/TcpServer.cpp
+    app/ShutdownManager.cpp
+    app/App.cpp
 )
 target_include_directories(tcp_echo_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -38,6 +40,8 @@ add_executable(tests
     tests/test_tcp_server.cpp
     tests/test_client.cpp
     tests/test_client_pool.cpp
+    tests/test_shutdown_manager.cpp
+    tests/test_app.cpp
 )
 target_link_libraries(tests PRIVATE tcp_echo_core doctest::doctest)
 add_test(NAME tests COMMAND tests)
