@@ -4,14 +4,15 @@
 #include <format>
 
 #include "logging/DbLoggerProxy.h"
+#include "logging/FileLogger.h"
 
 App::App(const Config& cfg)
     : cfg_(cfg)
-    , logger_(std::make_unique<DbLoggerProxy>(
-        "host=localhost dbname=app_db user=appuser application_name=app",
-        "class App"
-        )
-        )
+    , logger_([&cfg]() -> std::unique_ptr<ILogger> {
+        if (cfg.db_dsn)
+            return std::make_unique<DbLoggerProxy>(*cfg.db_dsn, "App");
+        return std::make_unique<FileLogger>(cfg.log_path);
+    }())
     , server_(cfg_.port)
     , shutdown_()
     , pool_(server_.fd(), cfg_.poll_size)

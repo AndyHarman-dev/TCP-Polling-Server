@@ -2,7 +2,6 @@
 #include "ILogger.h"
 #include "app/ShutdownManager.h"
 #include "config/Config.h"
-#include "logging/FileLogger.h"
 #include "net/ClientPool.h"
 #include "net/TcpServer.h"
 

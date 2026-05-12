@@ -24,12 +24,17 @@ ArgParser::ArgParser(int argc, char* argv[]) {
 void ArgParser::apply(Config& cfg) const {
     auto port_it = args_.find("0");
     if (port_it == args_.end() || port_it->second.empty()) {
-        throw std::invalid_argument("Usage: server <port> [--log-file=<path>]");
+        throw std::invalid_argument("Usage: server <port> [--log-file=<path>] [--db-dsn=<connstr>]");
     }
     cfg.port = port_it->second;
 
     auto log_it = args_.find("log-file");
     if (log_it != args_.end() && !log_it->second.empty()) {
         cfg.log_path = log_it->second;
+    }
+
+    auto db_it = args_.find("db-dsn");
+    if (db_it != args_.end() && !db_it->second.empty()) {
+        cfg.db_dsn = db_it->second;
     }
 }

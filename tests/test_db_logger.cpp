@@ -17,7 +17,14 @@ TEST_CASE("DbLogger: log") {
     );
 
     const std::string StartupMessage("log test: server booted");
-    constexpr std::string TcpMessage("log test: slow client");
+    const std::string TcpMessage("log test: slow client");
+
+    {
+        pqxx::connection conn("host=localhost dbname=app_db user=appuser application_name=my_server");
+        pqxx::work w{conn};
+        w.exec("TRUNCATE logs");
+        w.commit();
+    }
 
     logger.log(
         DbLogger::Level::Info,
@@ -31,7 +38,6 @@ TEST_CASE("DbLogger: log") {
         R"({"latency_ms": 1240})"
     );
 
-    // Check that logs are there
     pqxx::connection conn("host=localhost dbname=app_db user=appuser application_name=my_server");
     pqxx::work w{conn};
 
@@ -43,10 +49,10 @@ TEST_CASE("DbLogger: log") {
         auto source = row["source"].as<std::string>();
         auto msg = row["message"].as<std::string>();
 
-        if (source.compare("startup") && msg.compare(StartupMessage)) {}
+        if (source == "startup" && msg == StartupMessage)
             bHasStartupSourceAndMessage = true;
 
-        if (source.compare("tcp ") && msg.compare(TcpMessage)) {}
+        if (source == "tcp" && msg == TcpMessage)
             bHasTcpSourceAndMessage = true;
     }
 

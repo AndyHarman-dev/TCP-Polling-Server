@@ -31,5 +31,5 @@ void DbLoggerProxy::error(std::string_view msg) {
 }
 
 void DbLoggerProxy::raw(const char *data, int n) {
-    info(std::string(data));
+    info(std::string(data, n));
 }

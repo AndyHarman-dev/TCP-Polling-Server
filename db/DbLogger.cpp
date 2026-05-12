@@ -43,8 +43,8 @@ void DbLogger::log(Level l, std::string_view source, std::string_view message, s
 
       txn.commit();
    }
-   catch (const pqxx::broken_connection& e) {
-      std::cerr << e.what() << std::endl;
+   catch (const std::exception& e) {
+      std::cerr << "[DbLogger] " << e.what() << std::endl;
    }
 }
 
