@@ -18,7 +18,7 @@ FetchContent_MakeAvailable(doctest)
 
 add_library(tcp_echo_core STATIC
     util/sockets.cpp
-    logging/Logger.cpp
+        logging/FileLogger.cpp
     config/ArgParser.cpp
     net/Client.cpp
     net/ClientPool.cpp
@@ -26,6 +26,7 @@ add_library(tcp_echo_core STATIC
     app/ShutdownManager.cpp
     app/App.cpp
     db/DbLogger.cpp
+        app/ILogger.h
 )
 target_include_directories(tcp_echo_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(tcp_echo_core PRIVATE libpqxx::pqxx)

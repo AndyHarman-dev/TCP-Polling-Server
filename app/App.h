@@ -1,7 +1,8 @@
 #pragma once
+#include "ILogger.h"
 #include "app/ShutdownManager.h"
 #include "config/Config.h"
-#include "logging/Logger.h"
+#include "logging/FileLogger.h"
 #include "net/ClientPool.h"
 #include "net/TcpServer.h"
 
@@ -18,7 +19,7 @@ public:
 
 private:
     Config cfg_;
-    Logger logger_;
+    std::unique_ptr<ILogger> logger_;
     TcpServer server_;
     ShutdownManager shutdown_;  // must come after server_ (no deps, but logically last setup)
     ClientPool pool_;           // needs server_.fd() — declared after server_

@@ -2,7 +2,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include "logging/Logger.h"
+#include "logging/FileLogger.h"
 
 namespace fs = std::filesystem;
 
@@ -16,7 +16,7 @@ TEST_CASE("Logger::raw writes bytes to file") {
     fs::remove(path);
 
     {
-        Logger logger(path);
+        FileLogger logger(path);
         logger.raw("hello", 5);
     }
 
@@ -27,7 +27,7 @@ TEST_CASE("Logger::raw writes bytes to file") {
 }
 
 TEST_CASE("Logger throws when file cannot be opened") {
-    CHECK_THROWS_AS(Logger("/no/such/directory/test.log"), std::runtime_error);
+    CHECK_THROWS_AS(FileLogger("/no/such/directory/test.log"), std::runtime_error);
 }
 
 TEST_CASE("Logger::raw appends across instances") {
@@ -35,11 +35,11 @@ TEST_CASE("Logger::raw appends across instances") {
     fs::remove(path);
 
     {
-        Logger logger(path);
+        FileLogger logger(path);
         logger.raw("foo", 3);
     }
     {
-        Logger logger(path);
+        FileLogger logger(path);
         logger.raw("bar", 3);
     }
 
