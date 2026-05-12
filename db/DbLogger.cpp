@@ -22,7 +22,7 @@ void DbLogger::ensure_schema() {
 }
 
 DbLogger::DbLogger(std::string_view conn_str) {
-   conn_ = std::make_unique<pqxx::connection>(conn_str.data());
+   conn_ = std::make_unique<pqxx::connection>(std::string(conn_str));
    ensure_schema();
    conn_->prepare("insert_log", "INSERT INTO logs (level, source, client, message, metadata) "
                                 "VALUES ($1, $2, $3::inet, $4, $5::jsonb)");
@@ -33,14 +33,13 @@ void DbLogger::log(Level l, std::string_view source, std::string_view message, s
    std::lock_guard<std::mutex> lk(mtx_);
    try {
       pqxx::work txn{ *conn_ };
-      txn.exec_prepared("insert_log",
-         level_str(l),
-         std::string(source),
-         client.has_value() ? pqxx::params{ *client } : pqxx::params{nullptr},
-         std::string(message),
-         json_obj.has_value() ? pqxx::params{ *json_obj } : pqxx::params{nullptr}
-      );
-
+      pqxx::params p;
+      p.append(level_str(l));
+      p.append(std::string(source));
+      if (client) p.append(*client); else p.append(nullptr);
+      p.append(std::string(message));
+      if (json_obj) p.append(*json_obj); else p.append(nullptr);
+      txn.exec(pqxx::prepped{"insert_log"}, p);
       txn.commit();
    }
    catch (const std::exception& e) {
