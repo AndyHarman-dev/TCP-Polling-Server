@@ -27,6 +27,8 @@ add_library(tcp_echo_core STATIC
     app/App.cpp
     db/DbLogger.cpp
         app/ILogger.h
+        logging/DbLoggerProxy.cpp
+        logging/DbLoggerProxy.h
 )
 target_include_directories(tcp_echo_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(tcp_echo_core PRIVATE libpqxx::pqxx)

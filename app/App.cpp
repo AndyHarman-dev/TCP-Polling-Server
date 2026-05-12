@@ -3,9 +3,15 @@
 #include <cstring>
 #include <format>
 
+#include "logging/DbLoggerProxy.h"
+
 App::App(const Config& cfg)
     : cfg_(cfg)
-    , logger_(std::make_unique<FileLogger>(cfg_.log_path))
+    , logger_(std::make_unique<DbLoggerProxy>(
+        "host=localhost dbname=app_db user=appuser application_name=app",
+        "class App"
+        )
+        )
     , server_(cfg_.port)
     , shutdown_()
     , pool_(server_.fd(), cfg_.poll_size)
