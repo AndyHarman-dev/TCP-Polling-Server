@@ -31,6 +31,25 @@ target_include_directories(tcp_echo_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 add_executable(TCPEchoingServer main.cpp)
 target_link_libraries(TCPEchoingServer PRIVATE tcp_echo_core)
 
+# libpqxx installed via Homebrew — no CMake config file shipped, so we locate
+# headers and library manually and create an imported target.
+find_path(LIBPQXX_INCLUDE_DIR pqxx/pqxx
+    HINTS /opt/homebrew/include
+    REQUIRED
+)
+find_library(LIBPQXX_LIB pqxx
+    HINTS /opt/homebrew/lib
+    REQUIRED
+)
+add_library(libpqxx::pqxx UNKNOWN IMPORTED)
+set_target_properties(libpqxx::pqxx PROPERTIES
+    IMPORTED_LOCATION "${LIBPQXX_LIB}"
+    INTERFACE_INCLUDE_DIRECTORIES "${LIBPQXX_INCLUDE_DIR}"
+)
+
+add_executable(db_ping db/ping.cpp)
+target_link_libraries(db_ping PRIVATE libpqxx::pqxx)
+
 include(CTest)
 add_executable(tests
     tests/test_main.cpp
@@ -42,6 +61,8 @@ add_executable(tests
     tests/test_client_pool.cpp
     tests/test_shutdown_manager.cpp
     tests/test_app.cpp
+    tests/test_db.cpp
+    tests/test_db_errors.cpp
 )
-target_link_libraries(tests PRIVATE tcp_echo_core doctest::doctest)
+target_link_libraries(tests PRIVATE tcp_echo_core doctest::doctest libpqxx::pqxx)
 add_test(NAME tests COMMAND tests)
