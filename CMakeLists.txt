@@ -25,8 +25,10 @@ add_library(tcp_echo_core STATIC
     net/TcpServer.cpp
     app/ShutdownManager.cpp
     app/App.cpp
+    db/DbLogger.cpp
 )
 target_include_directories(tcp_echo_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(tcp_echo_core PRIVATE libpqxx::pqxx)
 
 add_executable(TCPEchoingServer main.cpp)
 target_link_libraries(TCPEchoingServer PRIVATE tcp_echo_core)
@@ -63,6 +65,7 @@ add_executable(tests
     tests/test_app.cpp
     tests/test_db.cpp
     tests/test_db_errors.cpp
+    tests/test_db_logger.cpp
 )
 target_link_libraries(tests PRIVATE tcp_echo_core doctest::doctest libpqxx::pqxx)
 add_test(NAME tests COMMAND tests)
