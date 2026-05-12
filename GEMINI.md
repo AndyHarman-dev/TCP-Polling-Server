@@ -4,39 +4,41 @@ This project is a small, event-driven TCP echoing server written in modern C++ (
 
 ## Project Overview
 
-*   **Architecture:** Single-threaded, event-driven using `poll(2)`.
-*   **Technologies:** 
-    *   Language: C++23 (`std::expected`, `std::format`, `std::filesystem`).
+*   **Architecture:** Single-threaded, event-driven using `poll(2)`. All production code lives in the `tcp_echo_core` static library; `main.cpp` is a thin 19-line entry point.
+*   **Technologies:**
+    *   Language: C++23 (`std::format`, `std::filesystem`).
     *   Build System: CMake (requires 3.14+).
-    *   Dependencies: `doctest` (automatically fetched via FetchContent).
+    *   Dependencies: `doctest` v2.4.11 (automatically fetched via FetchContent).
     *   Platforms: Primarily POSIX (uses `<sys/socket.h>`, `<poll.h>`, etc.).
 
 ## Key Components
 
-*   `main.cpp`: The entry point and main event loop. Manages socket lifecycle and client data dispatch.
-*   `tcp_echo_core`: A static library containing:
-    *   `logging/Logger.h/cpp`: Thread-safe file logging.
-    *   `util/sockets.h/cpp`: Low-level socket utility functions.
-*   `config/Config.h` & `ArgParser.h`: Configuration management and CLI argument parsing.
-*   `tests/`: Unit tests for core components using `doctest`.
+`tcp_echo_core` static library:
+
+*   `config/Config.h`: Plain struct — port, log path, poll size (with defaults).
+*   `config/ArgParser`: Parses `--key=value`, `--key value`, and positional args; `apply(Config&)` throws `std::invalid_argument` if port is absent.
+*   `logging/Logger`: Mutex-guarded; `info`/`error` write to stdout/stderr and log file; `raw()` writes bytes to file only.
+*   `net/TcpServer`: RAII listener — constructor runs `getaddrinfo`→`bind`→`listen`, throws `std::runtime_error` on failure; `accept_client()` returns a `Client`.
+*   `net/Client`: RAII move-only fd wrapper; `receive()` calls `recv` into a 256-byte internal buffer (returns bytes, 0=disconnect, -1=error).
+*   `net/ClientPool`: Parallel `vector<pollfd>` + `vector<Client>`; `for_each_ready_client(fn)` removes clients where `fn` returns `false` via mark-and-sweep reverse erase.
+*   `app/ShutdownManager`: Installs SIGINT/SIGTERM via `sigaction`; enforces single-instance with `compare_exchange_strong` (throws `std::logic_error` if violated); hooks fire in reverse registration order on destruction.
+*   `app/App`: Composes all subsystems as value members; owns the `poll(2)` event loop.
+
+Member declaration order in `App` is load-bearing: `cfg_` → `logger_` → `server_` → `shutdown_` → `pool_` (pool requires `server_.fd()`).
 
 ## Building and Running
 
 ### Build Instructions
 
 ```bash
-# Using CMake (Recommended)
-cmake -B build
-cmake --build build
-
-# Direct Compilation (Minimum requirements)
-g++ -std=c++23 -O2 -o server main.cpp
+cmake -B cmake-build-debug
+cmake --build cmake-build-debug
 ```
 
 ### Running the Server
 
 ```bash
-./build/TCPEchoingServer 8080 --log-file=server_msgs.log
+./cmake-build-debug/TCPEchoingServer 8080 --log-file=server_msgs.log
 ```
 
 *   **Port:** The first positional argument (required).
@@ -45,9 +47,8 @@ g++ -std=c++23 -O2 -o server main.cpp
 ### Running Tests
 
 ```bash
-# Using CMake/CTest
-cmake --build build --target tests
-ctest --test-dir build --output-on-failure
+cmake --build cmake-build-debug --target tests
+ctest --test-dir cmake-build-debug --output-on-failure
 ```
 
 ## Development Workflow: Test-Driven Development
@@ -59,12 +60,11 @@ The TDD Loop:
 2.  **Green:** Write the minimum production code needed to make the test pass.
 3.  **Refactor:** Clean up production and test code while ensuring the suite stays green.
 
-Tests live under `tests/` and use the **doctest** framework. When fixing a bug, include a regression test. When adding a feature, include the test in the same change.
+Tests live under `tests/` and use the **doctest** framework (`TEST_CASE` / `CHECK` / `REQUIRE`). When fixing a bug, include a regression test. When adding a feature, include the test in the same change.
 
 ## Development Conventions
 
-*   **Modern C++:** Use C++23 features whenever appropriate.
-*   **Error Handling:** Prefer `std::expected` for functions that can fail, especially in the socket layer.
-*   **Testing:** All new core logic should be accompanied by unit tests in the `tests/` directory.
-*   **Graceful Shutdown:** The server should handle `SIGINT` and `SIGTERM` to clean up resources.
-*   **Encapsulation:** The project is in the process of refactoring towards better encapsulation (e.g., introducing an `App` object and persistent settings). Follow this direction for new features.
+*   **Modern C++:** Use C++23 features where appropriate (`std::format`, structured bindings, etc.).
+*   **Error Handling:** Throw standard exceptions (`std::runtime_error`, `std::invalid_argument`, `std::logic_error`). Do not use `std::expected`.
+*   **RAII:** All resource ownership (fds, signal handlers) must be managed by destructors. No manual cleanup in application code.
+*   **Graceful Shutdown:** The server handles `SIGINT` and `SIGTERM` via `ShutdownManager`. Signal handlers must be async-signal-safe (flag-only).

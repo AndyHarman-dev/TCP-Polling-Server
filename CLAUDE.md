@@ -4,13 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build
 
-Compile directly with g++ (preferred for quick iteration):
-
-```bash
-g++ -std=c++23 -O2 -o server main.cpp
-```
-
-Or via CMake (C++23 required):
+CMake (C++23 required):
 
 ```bash
 cmake -B cmake-build-debug && cmake --build cmake-build-debug
@@ -19,7 +13,7 @@ cmake -B cmake-build-debug && cmake --build cmake-build-debug
 ## Running
 
 ```bash
-./server <port> [--log-file=<path>]
+./cmake-build-debug/TCPEchoingServer <port> [--log-file=<path>]
 ```
 
 The first positional argument is the port. `--log-file` defaults to `./server_msgs.log`. Stop with `Ctrl-C` (SIGINT) or SIGTERM.
@@ -57,13 +51,22 @@ When fixing a reported bug, the first commit (or the first hunk of the fix commi
 
 ## Architecture
 
-Single file (`main.cpp`), single-threaded, event-driven using `poll(2)`.
+Single-threaded, event-driven using `poll(2)`. All production code lives in the
+`tcp_echo_core` static library; `main.cpp` is a thin 19-line entry point.
 
-- **`polling_file_descriptors`** — thin RAII wrapper around `std::vector<pollfd>`. Holds the listening socket and all accepted client sockets in one poll set.
-- **Event loop** — blocks on `poll(-1)`; dispatches to `handle_new_connection` (listening socket ready) or `handle_client_data` (client fd ready). Client removal during iteration decrements the loop index to stay correct.
-- **`handle_client_data`** — reads up to 256 bytes, writes to stdout and appends to the log `std::ofstream`. A zero-byte read means the client hung up; any error also closes and removes the fd.
-- **Shutdown** — `SIGINT`/`SIGTERM` handlers set `app::gstop` (`std::atomic<bool>`); the loop exits on the next iteration and closes the listening socket.
-- **`get_listen_socket`** — uses `getaddrinfo` + `SO_REUSEADDR`; returns `std::expected<int, std::string>`.
-- **`parse_args`** — handles `--key=value`, `--key value`, and positional arguments (keyed by `"0"`, `"1"`, …).
+### Component map
 
-C++23 features in use: `std::expected`, `std::format`.
+| Component | Files | Responsibility |
+|---|---|---|
+| `Config` | `config/Config.h` | Plain struct: port, log path, poll size |
+| `ArgParser` | `config/ArgParser` | Parses argv into Config; throws `std::invalid_argument` if port missing |
+| `Logger` | `logging/Logger` | Mutex-guarded; `info`/`error` → stdout/stderr + file; `raw()` → file only |
+| `TcpServer` | `net/TcpServer` | RAII listener: `getaddrinfo`→`bind`→`listen`; `accept_client()` returns `Client` |
+| `Client` | `net/Client` | RAII move-only fd wrapper; `receive()` → recv into 256-byte buffer |
+| `ClientPool` | `net/ClientPool` | Parallel `vector<pollfd>` + `vector<Client>`; mark-and-sweep removal via `for_each_ready_client(fn)` |
+| `ShutdownManager` | `app/ShutdownManager` | Installs SIGINT/SIGTERM via `sigaction`; single-instance enforced with `compare_exchange_strong`; hooks fire in reverse order on destruction |
+| `App` | `app/App` | Composes all subsystems; owns the `poll(2)` event loop |
+
+`App` member declaration order matters for initialization: `cfg_` → `logger_` → `server_` → `shutdown_` → `pool_` (pool needs `server_.fd()`).
+
+C++23 features in use: `std::format`.
