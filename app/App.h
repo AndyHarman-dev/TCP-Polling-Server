@@ -1,7 +1,10 @@
 #pragma once
+#include <optional>
 #include "ILogger.h"
+#include "app/PurgeBridge.h"
 #include "app/ShutdownManager.h"
 #include "config/Config.h"
+#include "http/HttpServer.h"
 #include "net/ClientPool.h"
 #include "net/TcpServer.h"
 
@@ -20,6 +23,8 @@ private:
     Config cfg_;
     std::unique_ptr<ILogger> logger_;
     TcpServer server_;
-    ShutdownManager shutdown_;  // must come after server_ (no deps, but logically last setup)
-    ClientPool pool_;           // needs server_.fd() — declared after server_
+    ShutdownManager shutdown_;
+    PurgeBridge bridge_;
+    ClientPool pool_;
+    std::optional<HttpServer> http_server_;
 };

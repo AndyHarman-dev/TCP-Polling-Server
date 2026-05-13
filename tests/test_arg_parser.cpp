@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <chrono>
 #include <stdexcept>
 #include "config/Config.h"
 #include "config/ArgParser.h"
@@ -46,6 +47,63 @@ TEST_CASE("ArgParser: default log path preserved when not specified") {
 TEST_CASE("ArgParser: throws when port is missing") {
     const char* argv[] = {"server"};
     ArgParser parser(1, const_cast<char**>(argv));
+    Config cfg;
+    CHECK_THROWS_AS(parser.apply(cfg), std::invalid_argument);
+}
+
+TEST_CASE("Config: idle_timeout defaults to 10 minutes") {
+    Config cfg;
+    CHECK(cfg.idle_timeout == std::chrono::seconds(600));
+}
+
+TEST_CASE("Config: http_port is absent by default") {
+    Config cfg;
+    CHECK_FALSE(cfg.http_port.has_value());
+}
+
+TEST_CASE("ArgParser: --idle-timeout=10m sets 600s") {
+    const char* argv[] = {"server", "8080", "--idle-timeout=10m"};
+    ArgParser parser(3, const_cast<char**>(argv));
+    Config cfg;
+    parser.apply(cfg);
+    CHECK(cfg.idle_timeout == std::chrono::seconds(600));
+}
+
+TEST_CASE("ArgParser: --idle-timeout=30s sets 30s") {
+    const char* argv[] = {"server", "8080", "--idle-timeout=30s"};
+    ArgParser parser(3, const_cast<char**>(argv));
+    Config cfg;
+    parser.apply(cfg);
+    CHECK(cfg.idle_timeout == std::chrono::seconds(30));
+}
+
+TEST_CASE("ArgParser: --idle-timeout=1h sets 3600s") {
+    const char* argv[] = {"server", "8080", "--idle-timeout=1h"};
+    ArgParser parser(3, const_cast<char**>(argv));
+    Config cfg;
+    parser.apply(cfg);
+    CHECK(cfg.idle_timeout == std::chrono::seconds(3600));
+}
+
+TEST_CASE("ArgParser: --idle-timeout with invalid suffix throws") {
+    const char* argv[] = {"server", "8080", "--idle-timeout=5x"};
+    ArgParser parser(3, const_cast<char**>(argv));
+    Config cfg;
+    CHECK_THROWS_AS(parser.apply(cfg), std::invalid_argument);
+}
+
+TEST_CASE("ArgParser: --http-port sets port") {
+    const char* argv[] = {"server", "8080", "--http-port=8081"};
+    ArgParser parser(3, const_cast<char**>(argv));
+    Config cfg;
+    parser.apply(cfg);
+    REQUIRE(cfg.http_port.has_value());
+    CHECK(cfg.http_port.value() == 8081);
+}
+
+TEST_CASE("ArgParser: --http-port with invalid value throws") {
+    const char* argv[] = {"server", "8080", "--http-port=notanumber"};
+    ArgParser parser(3, const_cast<char**>(argv));
     Config cfg;
     CHECK_THROWS_AS(parser.apply(cfg), std::invalid_argument);
 }

@@ -4,6 +4,16 @@ project(TCPEchoingServer)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(APPLE)
+    # macOS SDK uuid lives under uuid/uuid.h; point FindUUID at the parent dir.
+    # libuuid is folded into libc on macOS, so the link variable is intentionally empty.
+    execute_process(COMMAND xcrun --show-sdk-path OUTPUT_VARIABLE MACOS_SDK_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
+    set(UUID_INCLUDE_DIR "${MACOS_SDK_PATH}/usr/include" CACHE PATH "")
+    set(UUID_LIBRARIES "" CACHE STRING "")
+endif()
+
+find_package(Drogon CONFIG REQUIRED HINTS /usr/local/lib/cmake/Drogon)
+
 include(FetchContent)
 
 FetchContent_Declare(
@@ -18,20 +28,23 @@ FetchContent_MakeAvailable(doctest)
 
 add_library(tcp_echo_core STATIC
     util/sockets.cpp
-        logging/FileLogger.cpp
+    util/duration.cpp
+    logging/FileLogger.cpp
     config/ArgParser.cpp
     net/Client.cpp
     net/ClientPool.cpp
     net/TcpServer.cpp
     app/ShutdownManager.cpp
     app/App.cpp
+    app/PurgeBridge.cpp
+    http/HttpServer.cpp
     db/DbLogger.cpp
-        app/ILogger.h
-        logging/DbLoggerProxy.cpp
-        logging/DbLoggerProxy.h
+    logging/DbLoggerProxy.cpp
+    logging/DbLoggerProxy.h
+    app/ILogger.h
 )
 target_include_directories(tcp_echo_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(tcp_echo_core PRIVATE libpqxx::pqxx)
+target_link_libraries(tcp_echo_core PRIVATE libpqxx::pqxx Drogon::Drogon)
 
 add_executable(TCPEchoingServer main.cpp)
 target_link_libraries(TCPEchoingServer PRIVATE tcp_echo_core)
@@ -69,6 +82,8 @@ add_executable(tests
     tests/test_db.cpp
     tests/test_db_errors.cpp
     tests/test_db_logger.cpp
+    tests/test_purge_idle.cpp
+    tests/test_purge_bridge.cpp
 )
 target_link_libraries(tests PRIVATE tcp_echo_core doctest::doctest libpqxx::pqxx)
 add_test(NAME tests COMMAND tests)

@@ -1,12 +1,14 @@
 #pragma once
 #include <array>
+#include <chrono>
 #include <sys/socket.h>
 
 class Client {
 public:
     static constexpr int BUFFER_SIZE = 256;
 
-    Client(int fd, sockaddr_storage addr);
+    Client(int fd, sockaddr_storage addr,
+           std::chrono::steady_clock::time_point last_activity = std::chrono::steady_clock::now());
     ~Client();
 
     Client(const Client&)            = delete;
@@ -19,9 +21,11 @@ public:
 
     [[nodiscard]] const char* buffer() const;
     [[nodiscard]] int fd() const;
+    [[nodiscard]] std::chrono::steady_clock::time_point last_activity() const;
 
 private:
     int fd_ = -1;
     sockaddr_storage addr_{};
     std::array<char, BUFFER_SIZE> buffer_{};
+    std::chrono::steady_clock::time_point last_activity_;
 };

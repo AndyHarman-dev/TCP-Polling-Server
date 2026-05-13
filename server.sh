@@ -6,9 +6,12 @@ LOG_FILE="${LOG_FILE:-server.log}"
 
 usage() {
   echo "Usage:"
-  echo "  $0 start <server-executable> <port>"
+  echo "  $0 start <server-executable> <port> [--log-file=<path>] [--http-port=<port>] [--idle-timeout=<duration>] [--db-dsn=<connstr>]"
   echo "  $0 status <pid>"
   echo "  $0 stop <pid>"
+  echo ""
+  echo "Environment:"
+  echo "  LOG_FILE=<path>  lifecycle log (default: server.log)"
   exit 1
 }
 
@@ -20,7 +23,7 @@ cmd="$1"
 
 case "$cmd" in
   start)
-    if [[ "$#" -ne 3 ]]; then
+    if [[ "$#" -lt 3 ]]; then
       usage
     fi
     exe="$2"
@@ -35,7 +38,7 @@ case "$cmd" in
       exit 1
     fi
 
-    nohup "$exe" "$port" >>"$LOG_FILE" 2>&1 &
+    nohup "$exe" "$port" "${@:4}" >>"$LOG_FILE" 2>&1 &
     pid=$!
     disown "$pid" 2>/dev/null || true
 

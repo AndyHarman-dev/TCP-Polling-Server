@@ -1,4 +1,6 @@
 #include "config/ArgParser.h"
+#include "util/duration.h"
+#include <charconv>
 #include <stdexcept>
 
 ArgParser::ArgParser(int argc, char* argv[]) {
@@ -36,5 +38,23 @@ void ArgParser::apply(Config& cfg) const {
     auto db_it = args_.find("db-dsn");
     if (db_it != args_.end() && !db_it->second.empty()) {
         cfg.db_dsn = db_it->second;
+    }
+
+    auto idle_it = args_.find("idle-timeout");
+    if (idle_it != args_.end() && !idle_it->second.empty()) {
+        cfg.idle_timeout = util::parse_duration(idle_it->second);
+    }
+
+    auto http_it = args_.find("http-port");
+    if (http_it != args_.end() && !http_it->second.empty()) {
+        int port = 0;
+        auto [ptr, ec] = std::from_chars(http_it->second.data(),
+                                         http_it->second.data() + http_it->second.size(),
+                                         port);
+        if (ec != std::errc{} || ptr != http_it->second.data() + http_it->second.size()
+            || port < 1 || port > 65535) {
+            throw std::invalid_argument("invalid http-port: " + http_it->second);
+        }
+        cfg.http_port = static_cast<uint16_t>(port);
     }
 }

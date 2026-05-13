@@ -1,11 +1,26 @@
 #include "app/App.h"
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <format>
 
 #include "logging/DbLoggerProxy.h"
 #include "logging/FileLogger.h"
 
+// Member declaration order (see App.h) is load-bearing — members are
+// constructed top-to-bottom and destroyed bottom-to-top. The order is:
+//
+//   cfg_         — plain data; no deps.
+//   logger_      — constructed early so subsequent members can log if needed.
+//   server_      — owns the listening socket; pool_ needs its fd.
+//   shutdown_    — installs signal handlers.
+//   bridge_      — owns the wakeup pipe; must be alive before pool_ is
+//                  constructed (pool_ takes bridge_.read_fd()) and must
+//                  outlive http_server_ (Drogon thread enqueues via it).
+//   pool_        — needs server_.fd() and bridge_.read_fd().
+//   http_server_ — optional; constructed only when cfg.http_port is set.
+//                  Declared last so its destructor (drogon::quit + join)
+//                  runs first, before bridge_ and pool_ are torn down.
 App::App(const Config& cfg)
     : cfg_(cfg)
     , logger_([&cfg]() -> std::unique_ptr<ILogger> {
@@ -15,8 +30,13 @@ App::App(const Config& cfg)
     }())
     , server_(cfg_.port)
     , shutdown_()
-    , pool_(server_.fd(), cfg_.poll_size)
-{}
+    , bridge_()
+    , pool_(server_.fd(), cfg_.poll_size, bridge_.read_fd())
+{
+    if (cfg_.http_port) {
+        http_server_.emplace(cfg_, bridge_, [this] { shutdown_.request(0); });
+    }
+}
 
 int App::run() {
     logger_->info(std::format("Logging to {}", cfg_.log_path.string()));
@@ -29,6 +49,15 @@ int App::run() {
             logger_->error("poll() failed");
             shutdown_.request(1);
             break;
+        }
+
+        if (pool_.is_wakeup_ready()) {
+            bridge_.drain([this](PurgeBridge::Request& req) {
+                size_t count = pool_.purge_idle(req.threshold,
+                                                std::chrono::steady_clock::now());
+                logger_->info(std::format("purge: removed {} idle client(s)", count));
+                req.on_complete(count);
+            });
         }
 
         if (pool_.is_server_ready()) {
