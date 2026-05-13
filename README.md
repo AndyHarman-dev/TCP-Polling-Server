@@ -31,6 +31,13 @@ The resulting binary is `cmake-build-debug/TCPEchoingServer`.
 
 The server stops gracefully on `SIGINT` or `SIGTERM`.
 
+Once running, connect from any terminal with `telnet` and start typing — each
+line is echoed to stdout and appended to the log file:
+
+```bash
+telnet 127.0.0.1 8080
+```
+
 ## REST Admin API
 
 When `--http-port` is set, a Drogon HTTP server starts on a dedicated thread
